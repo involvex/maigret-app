@@ -5,6 +5,7 @@ import * as WebBrowser from "expo-web-browser";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { ExportButtons } from "@/components/export-buttons";
 import { useTheme } from "@/hooks/use-theme";
 import { MaxContentWidth, Spacing } from "@/constants/theme";
 import {
@@ -160,6 +161,20 @@ export default function HistoryScreen() {
                             No hits in this scan.
                           </ThemedText>
                         )}
+                      {rows.length > 0 && (
+                        <ExportButtons
+                          username={item.username}
+                          results={rows.map((r) => ({
+                            site: r.site,
+                            url: r.url,
+                            profileUrl: r.profile_url,
+                            status: r.status,
+                            httpStatus: r.http_status,
+                            error: r.error,
+                          }))}
+                          onNotice={() => {}}
+                        />
+                      )}
                       <Pressable
                         onPress={() => remove(item.id)}
                         style={[styles.delete, { borderColor: theme.border }]}

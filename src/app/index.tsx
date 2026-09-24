@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 
 import { ResultRow } from "@/components/result-row";
+import { ExportButtons } from "@/components/export-buttons";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { filterSites, parseProxyUrl, runScan } from "@/engine";
@@ -369,6 +370,20 @@ export default function SearchScreen() {
                   </Pressable>
                 ))}
               </View>
+              {!running && results.length > 0 && (
+                <ExportButtons
+                  username={username.trim()}
+                  results={results.map((r) => ({
+                    site: r.siteName,
+                    url: r.url,
+                    profileUrl: r.profileUrl,
+                    status: r.status,
+                    httpStatus: r.httpStatus,
+                    error: r.error,
+                  }))}
+                  onNotice={setNotice}
+                />
+              )}
             </View>
           )}
 
