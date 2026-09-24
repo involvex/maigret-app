@@ -1,61 +1,329 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import * as WebBrowser from "expo-web-browser";
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { ResultRow } from "@/components/result-row";
+import { ThemedText } from "@/components/themed-text";
+import { ThemedView } from "@/components/themed-view";
+import { filterSites, parseProxyUrl, runScan } from "@/engine";
+import type { CheckResult, MaigretDb, ScanSettings } from "@/engine/types";
+import { useTheme } from "@/hooks/use-theme";
+import { MaxContentWidth, Spacing } from "@/constants/theme";
+import { createScan, finishScan, insertResults } from "@/storage/db";
+import { getScanSettings, setScanSettings } from "@/storage/prefs";
+import { getActiveDb } from "@/storage/sites";
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
+type Filter = "all" | "hits";
+
+function validateUsername(raw: string): string | null {
+  const value = raw.trim();
+  if (!value) return "Enter a username to scan.";
+  if (value.length > 64) return "Username must be 64 characters or fewer.";
+  if (/\s/.test(value)) return "Username must not contain whitespace.";
+  return null;
 }
 
-export default function HomeScreen() {
+export default function SearchScreen() {
+  const theme = useTheme();
+  const [username, setUsername] = useState("");
+  const [proxyInput, setProxyInput] = useState("");
+  const [settings, setSettings] = useState<ScanSettings | null>(null);
+  const [db, setDb] = useState<MaigretDb | null>(null);
+  const [dbSource, setDbSource] = useState<"cache" | "bundled">("bundled");
+  const [siteCount, setSiteCount] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [completed, setCompleted] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [hits, setHits] = useState(0);
+  const [results, setResults] = useState<CheckResult[]>([]);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [notice, setNotice] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const [loadedSettings, active] = await Promise.all([
+        getScanSettings(),
+        getActiveDb(),
+      ]);
+      setSettings(loadedSettings);
+      setDb(active.db);
+      setDbSource(active.source);
+      setSiteCount(active.siteCount);
+      if (loadedSettings.proxyUrl) setProxyInput(loadedSettings.proxyUrl);
+    })();
+  }, []);
+
+  const startScan = useCallback(async () => {
+    const usernameError = validateUsername(username);
+    if (usernameError) {
+      setNotice(usernameError);
+      return;
+    }
+    if (!settings || !db) {
+      setNotice("Still loading settings and site database…");
+      return;
+    }
+    const cleanProxy = proxyInput.trim();
+    if (cleanProxy) {
+      try {
+        parseProxyUrl(cleanProxy);
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : "Invalid proxy URL.");
+        return;
+      }
+    }
+    const nextSettings: ScanSettings = {
+      ...settings,
+      proxyUrl: cleanProxy || undefined,
+    };
+    setSettings(nextSettings);
+    await setScanSettings(nextSettings);
+
+    const name = username.trim();
+    const sites = filterSites(db, {
+      tags: nextSettings.tags,
+      maxSites: nextSettings.maxSites,
+    });
+    if (sites.length === 0) {
+      setNotice(
+        "No sites match the current tag filter. Adjust it in Settings.",
+      );
+      return;
+    }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setRunning(true);
+    setResults([]);
+    setCompleted(0);
+    setHits(0);
+    setTotal(sites.length);
+    setFilter("all");
+    setNotice(
+      nextSettings.proxyUrl
+        ? "Note: proxy routing needs the native layer (Phase 5) — this scan uses a direct connection."
+        : null,
+    );
+
+    const scanId = await createScan(
+      name,
+      sites.length,
+      JSON.stringify(nextSettings),
+    );
+    const collected: CheckResult[] = [];
+    try {
+      const summary = await runScan({
+        username: name,
+        sites,
+        timeoutMs: nextSettings.timeoutMs,
+        concurrency: nextSettings.concurrency,
+        signal: controller.signal,
+        onResult: (result, progress) => {
+          collected.push(result);
+          setResults((prev) => [...prev, result]);
+          setCompleted(progress.completed);
+          setHits(progress.hits);
+        },
+      });
+      await insertResults(scanId, collected);
+      await finishScan(scanId, {
+        hits: summary.hits,
+        completed: summary.completed,
+        cancelled: summary.cancelled,
+      });
+      setNotice(
+        summary.cancelled
+          ? `Scan cancelled after ${summary.completed}/${summary.total} sites. Partial results saved to History.`
+          : `Scan finished: ${summary.hits} hit${summary.hits === 1 ? "" : "s"} on ${summary.total} sites. Saved to History.`,
+      );
+    } catch {
+      setNotice(
+        "Scan failed unexpectedly. Partial results were saved to History.",
+      );
+      try {
+        await insertResults(scanId, collected);
+        await finishScan(scanId, {
+          hits,
+          completed: collected.length,
+          cancelled: true,
+        });
+      } catch {
+        // Storage failure on top of a scan failure: surface the scan error only.
+      }
+    } finally {
+      abortRef.current = null;
+      setRunning(false);
+    }
+  }, [username, proxyInput, settings, db, hits]);
+
+  const cancelScan = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  const openUrl = useCallback(async (url: string) => {
+    try {
+      await WebBrowser.openBrowserAsync(url);
+    } catch {
+      setNotice("Could not open the profile URL.");
+    }
+  }, []);
+
+  const visibleResults = useMemo(
+    () =>
+      filter === "hits"
+        ? results.filter((r) => r.status === "claimed")
+        : results,
+    [results, filter],
+  );
+
+  const progress = total > 0 ? completed / total : 0;
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
+        <View style={styles.inner}>
+          <ThemedText type="subtitle">Maigret</ThemedText>
+          <ThemedText themeColor="textSecondary" type="small">
+            {siteCount > 0
+              ? `${siteCount} sites ready (${dbSource === "cache" ? "updated DB" : "offline snapshot"}) · for lawful OSINT use only`
+              : "Loading site database…"}
           </ThemedText>
-        </ThemedView>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+          <TextInput
+            value={username}
+            onChangeText={setUsername}
+            placeholder="username to investigate"
+            placeholderTextColor={theme.textSecondary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!running}
+            onSubmitEditing={startScan}
+            style={[
+              styles.input,
+              {
+                color: theme.text,
+                backgroundColor: theme.backgroundElement,
+                borderColor: theme.border,
+              },
+            ]}
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
+          <TextInput
+            value={proxyInput}
+            onChangeText={setProxyInput}
+            placeholder="SOCKS5/HTTP proxy (optional, e.g. socks5://127.0.0.1:9050)"
+            placeholderTextColor={theme.textSecondary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!running}
+            style={[
+              styles.input,
+              {
+                color: theme.text,
+                backgroundColor: theme.backgroundElement,
+                borderColor: theme.border,
+              },
+            ]}
           />
-        </ThemedView>
 
-        {Platform.OS === 'web' && <WebBadge />}
+          {notice ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              {notice}
+            </ThemedText>
+          ) : null}
+
+          <View style={styles.actions}>
+            {!running ? (
+              <Pressable
+                onPress={startScan}
+                style={({ pressed }) => [
+                  styles.button,
+                  {
+                    backgroundColor: theme.success,
+                    opacity: pressed ? 0.8 : 1,
+                  },
+                ]}
+              >
+                <ThemedText type="smallBold" style={styles.buttonText}>
+                  Start scan
+                </ThemedText>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={cancelScan}
+                style={({ pressed }) => [
+                  styles.button,
+                  { backgroundColor: theme.error, opacity: pressed ? 0.8 : 1 },
+                ]}
+              >
+                <ThemedText type="smallBold" style={styles.buttonText}>
+                  Cancel
+                </ThemedText>
+              </Pressable>
+            )}
+          </View>
+
+          {(running || total > 0) && (
+            <View>
+              <ThemedText type="small" themeColor="textSecondary">
+                {completed}/{total} sites · {hits} hit{hits === 1 ? "" : "s"}
+              </ThemedText>
+              <View
+                style={[
+                  styles.track,
+                  { backgroundColor: theme.backgroundSelected },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.fill,
+                    {
+                      width: `${Math.round(progress * 100)}%`,
+                      backgroundColor: theme.success,
+                    },
+                  ]}
+                />
+              </View>
+              <View style={styles.filters}>
+                {(["all", "hits"] as Filter[]).map((f) => (
+                  <Pressable
+                    key={f}
+                    onPress={() => setFilter(f)}
+                    style={[
+                      styles.chip,
+                      {
+                        backgroundColor:
+                          filter === f
+                            ? theme.backgroundSelected
+                            : "transparent",
+                        borderColor: theme.border,
+                      },
+                    ]}
+                  >
+                    <ThemedText type="small">
+                      {f === "all"
+                        ? `All (${results.length})`
+                        : `Hits (${hits})`}
+                    </ThemedText>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
+
+          <FlatList
+            data={visibleResults}
+            keyExtractor={(item, index) => `${item.siteName}-${index}`}
+            renderItem={({ item }) => (
+              <ResultRow result={item} onOpen={openUrl} />
+            )}
+            contentContainerStyle={styles.list}
+            ItemSeparatorComponent={() => (
+              <View style={{ height: Spacing.two }} />
+            )}
+          />
+        </View>
       </SafeAreaView>
     </ThemedView>
   );
@@ -64,35 +332,61 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    flexDirection: "row",
+    justifyContent: "center",
   },
   safeArea: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
     maxWidth: MaxContentWidth,
   },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  inner: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
+    gap: Spacing.two,
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+    paddingTop: Spacing.three,
+  },
+  input: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  actions: {
+    flexDirection: "row",
+  },
+  button: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  buttonText: {
+    color: "#09090b",
+  },
+  track: {
+    height: 6,
+    borderRadius: 3,
+    marginTop: Spacing.one,
+    overflow: "hidden",
+  },
+  fill: {
+    height: 6,
+    borderRadius: 3,
+  },
+  filters: {
+    flexDirection: "row",
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+  },
+  chip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one,
+  },
+  list: {
+    paddingBottom: Spacing.six,
+    paddingTop: Spacing.one,
   },
 });
