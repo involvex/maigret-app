@@ -56,6 +56,7 @@ export default function SettingsScreen() {
   const [maxSites, setMaxSites] = useState("80");
   const [tags, setTags] = useState("");
   const [proxy, setProxy] = useState("");
+  const [retryRateLimited, setRetryRateLimited] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [dbInfo, setDbInfo] = useState("Loading database info…");
   const [updating, setUpdating] = useState(false);
@@ -71,6 +72,7 @@ export default function SettingsScreen() {
       setMaxSites(String(settings.maxSites));
       setTags(settings.tags.join(", "));
       setProxy(settings.proxyUrl ?? "");
+      setRetryRateLimited(settings.retryRateLimited);
       setDbInfo(
         `${active.siteCount} sites (${active.source === "cache" ? "downloaded full DB" : "bundled offline snapshot"})` +
           (active.updatedAt
@@ -103,6 +105,7 @@ export default function SettingsScreen() {
         .map((t) => t.trim().toLowerCase())
         .filter(Boolean),
       proxyUrl: cleanProxy || undefined,
+      retryRateLimited,
     });
     setNotice("Settings saved.");
   };
@@ -151,6 +154,28 @@ export default function SettingsScreen() {
             value={maxSites}
             onChange={setMaxSites}
           />
+
+          <View style={styles.field}>
+            <ThemedText type="smallBold">Retry rate-limited sites</ThemedText>
+            <Pressable
+              onPress={() => setRetryRateLimited((v) => !v)}
+              style={[
+                styles.toggle,
+                {
+                  borderColor: theme.border,
+                  backgroundColor: retryRateLimited
+                    ? theme.backgroundSelected
+                    : "transparent",
+                },
+              ]}
+            >
+              <ThemedText type="small">
+                {retryRateLimited
+                  ? "On — re-check HTTP 429 sites once after 3s"
+                  : "Off — keep 429s as errors"}
+              </ThemedText>
+            </Pressable>
+          </View>
 
           <View style={styles.field}>
             <ThemedText type="smallBold">
@@ -315,6 +340,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: "center",
     marginTop: Spacing.one,
+  },
+  toggle: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 12,
   },
   card: {
     borderRadius: 12,

@@ -10,6 +10,7 @@ const K_CONCURRENCY = "maigret.concurrency";
 const K_MAX_SITES = "maigret.maxSites";
 const K_TAGS = "maigret.tags";
 const K_PROXY = "maigret.proxyUrl";
+const K_RETRY = "maigret.retryRateLimited";
 
 function toInt(raw: string | null, fallback: number): number {
   const n = raw == null ? NaN : Number.parseInt(raw, 10);
@@ -17,13 +18,14 @@ function toInt(raw: string | null, fallback: number): number {
 }
 
 export async function getScanSettings(): Promise<ScanSettings> {
-  const [timeoutMs, concurrency, maxSites, tagsJson, proxyUrl] =
+  const [timeoutMs, concurrency, maxSites, tagsJson, proxyUrl, retryRaw] =
     await Promise.all([
       Storage.getItem(K_TIMEOUT),
       Storage.getItem(K_CONCURRENCY),
       Storage.getItem(K_MAX_SITES),
       Storage.getItem(K_TAGS),
       Storage.getItem(K_PROXY),
+      Storage.getItem(K_RETRY),
     ]);
   let tags: string[] = [];
   try {
@@ -42,6 +44,10 @@ export async function getScanSettings(): Promise<ScanSettings> {
     maxSites: Math.max(0, toInt(maxSites, DEFAULT_SCAN_SETTINGS.maxSites)),
     tags,
     proxyUrl: proxyUrl?.trim() ? proxyUrl.trim() : undefined,
+    retryRateLimited:
+      retryRaw == null
+        ? DEFAULT_SCAN_SETTINGS.retryRateLimited
+        : retryRaw === "1",
   };
 }
 
@@ -52,5 +58,6 @@ export async function setScanSettings(settings: ScanSettings): Promise<void> {
     Storage.setItem(K_MAX_SITES, String(settings.maxSites)),
     Storage.setItem(K_TAGS, JSON.stringify(settings.tags)),
     Storage.setItem(K_PROXY, settings.proxyUrl ?? ""),
+    Storage.setItem(K_RETRY, settings.retryRateLimited ? "1" : "0"),
   ]);
 }

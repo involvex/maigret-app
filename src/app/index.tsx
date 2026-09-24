@@ -159,6 +159,14 @@ export default function SearchScreen() {
     );
     const collected: CheckResult[] = [];
     let lastServiceUpdate = 0;
+    const upsertCollected = (result: CheckResult) => {
+      const at = collected.findIndex((r) => r.siteName === result.siteName);
+      if (at >= 0) {
+        collected[at] = result;
+      } else {
+        collected.push(result);
+      }
+    };
     try {
       const summary = await runScan({
         username: name,
@@ -167,9 +175,23 @@ export default function SearchScreen() {
         concurrency: nextSettings.concurrency,
         fetchFn: nativeFetch ?? undefined,
         signal: controller.signal,
-        onResult: (result, progress) => {
-          collected.push(result);
-          setResults((prev) => [...prev, result]);
+        retryRateLimited: nextSettings.retryRateLimited,
+        onRetry: ({ count }) => {
+          setNotice(
+            `Retrying ${count} rate-limited site${count === 1 ? "" : "s"}…`,
+          );
+        },
+        onResult: (result, progress, meta) => {
+          upsertCollected(result);
+          setResults((prev) => {
+            const at = prev.findIndex((r) => r.siteName === result.siteName);
+            if (at >= 0 && (meta?.retryPass ?? 0) > 0) {
+              const next = [...prev];
+              next[at] = result;
+              return next;
+            }
+            return [...prev, result];
+          });
           setCompleted(progress.completed);
           setHits(progress.hits);
           if (
@@ -194,7 +216,7 @@ export default function SearchScreen() {
       setNotice(
         summary.cancelled
           ? `Scan cancelled after ${summary.completed}/${summary.total} sites. Partial results saved to History.`
-          : `Scan finished: ${summary.hits} hit${summary.hits === 1 ? "" : "s"} on ${summary.total} sites. Saved to History.`,
+          : `Scan finished: ${summary.hits} hit${summary.hits === 1 ? "" : "s"} on ${summary.total} sites${summary.retryPasses > 0 ? ` (${summary.retryPasses} retry pass${summary.retryPasses === 1 ? "" : "es"})` : ""}. Saved to History.`,
       );
     } catch {
       setNotice(

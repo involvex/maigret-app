@@ -4,9 +4,12 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { ThemedText } from "@/components/themed-text";
 import { useTheme } from "@/hooks/use-theme";
 import { Spacing } from "@/constants/theme";
+import { saveExportToFolder } from "@/export/files";
 import { shareExport, type ExportFormat, type ExportRow } from "@/export/share";
 
 const FORMATS: ExportFormat[] = ["json", "csv", "txt"];
+
+type Mode = "share" | "save";
 
 interface Props {
   username: string;
@@ -23,14 +26,26 @@ export const ExportButtons = memo(function ExportButtons({
 }: Props) {
   const theme = useTheme();
   const [busy, setBusy] = useState<ExportFormat | null>(null);
+  const [mode, setMode] = useState<Mode>("share");
 
   const exportAs = async (format: ExportFormat) => {
     if (disabled || busy) return;
     setBusy(format);
     try {
-      const outcome = await shareExport(format, username, results);
-      if (!outcome.shared && outcome.error) {
-        onNotice(outcome.error);
+      if (mode === "save") {
+        const outcome = await saveExportToFolder(format, username, results);
+        if (outcome.saved) {
+          onNotice(
+            `Saved ${outcome.fileName} — pick the file in your file manager.`,
+          );
+        } else if (outcome.error) {
+          onNotice(outcome.error);
+        }
+      } else {
+        const outcome = await shareExport(format, username, results);
+        if (!outcome.shared && outcome.error) {
+          onNotice(outcome.error);
+        }
       }
     } finally {
       setBusy(null);
@@ -41,9 +56,21 @@ export const ExportButtons = memo(function ExportButtons({
 
   return (
     <View style={styles.row}>
-      <ThemedText type="small" themeColor="textSecondary">
-        Export
-      </ThemedText>
+      <Pressable
+        onPress={() => setMode((m) => (m === "share" ? "save" : "share"))}
+        style={[
+          styles.chip,
+          {
+            borderColor: theme.border,
+            backgroundColor:
+              mode === "save" ? theme.backgroundSelected : "transparent",
+          },
+        ]}
+      >
+        <ThemedText type="small" themeColor="textSecondary">
+          {mode === "share" ? "Share" : "Save to file"}
+        </ThemedText>
+      </Pressable>
       {FORMATS.map((format) => (
         <Pressable
           key={format}

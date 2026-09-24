@@ -62,6 +62,8 @@ export interface ScanSettings {
   tags: string[];
   /** Proxy URL from settings, e.g. http://host:port or socks5://127.0.0.1:9050. */
   proxyUrl?: string;
+  /** Re-check HTTP-429 sites once after a cooldown (default true). */
+  retryRateLimited: boolean;
 }
 
 export const DEFAULT_SCAN_SETTINGS: ScanSettings = {
@@ -69,6 +71,7 @@ export const DEFAULT_SCAN_SETTINGS: ScanSettings = {
   concurrency: 20,
   maxSites: 80,
   tags: [],
+  retryRateLimited: true,
 };
 
 /** Minimal fetch surface the engine needs (keeps checker unit-testable). */
