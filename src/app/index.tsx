@@ -7,7 +7,21 @@ import { ResultRow } from "@/components/result-row";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { filterSites, parseProxyUrl, runScan } from "@/engine";
-import type { CheckResult, MaigretDb, ScanSettings } from "@/engine/types";
+import type {
+  CheckResult,
+  FetchLike,
+  MaigretDb,
+  ScanSettings,
+} from "@/engine/types";
+import {
+  applyProxySettings,
+  beginScanService,
+  createNativeFetch,
+  endScanService,
+  ensureNotificationPermission,
+  isNativeScannerAvailable,
+  updateScanService,
+} from "@/native/foreground";
 import { useTheme } from "@/hooks/use-theme";
 import { MaxContentWidth, Spacing } from "@/constants/theme";
 import { createScan, finishScan, insertResults } from "@/storage/db";
@@ -101,11 +115,41 @@ export default function SearchScreen() {
     setHits(0);
     setTotal(sites.length);
     setFilter("all");
-    setNotice(
-      nextSettings.proxyUrl
-        ? "Note: proxy routing needs the native layer (Phase 5) — this scan uses a direct connection."
-        : null,
-    );
+
+    // Native layer (dev/production builds): proxied OkHttp fetch + a
+    // dataSync foreground service so the scan survives a locked screen.
+    // Expo Go: direct connection, no keep-alive.
+    const useNative = isNativeScannerAvailable();
+    const proxyApplied = useNative
+      ? await applyProxySettings(nextSettings.proxyUrl)
+      : false;
+    const nativeFetch: FetchLike | null = useNative
+      ? createNativeFetch(nextSettings.timeoutMs)
+      : null;
+    let serviceActive = false;
+    if (useNative) {
+      const permitted = await ensureNotificationPermission();
+      serviceActive = await beginScanService(
+        `Scanning ${name}`,
+        `0/${sites.length} sites checked`,
+      );
+      if (!permitted || !serviceActive) {
+        setNotice(
+          "Notification permission denied — the scan runs, but Android may pause it when locked.",
+        );
+      } else if (!nextSettings.proxyUrl) {
+        setNotice(null);
+      }
+    }
+    if (!useNative && nextSettings.proxyUrl) {
+      setNotice(
+        "Expo Go has no native layer: this scan uses a direct connection. Build a dev client to route via proxy.",
+      );
+    } else if (!useNative) {
+      setNotice(null);
+    } else if (nextSettings.proxyUrl && proxyApplied) {
+      setNotice("Traffic is routed through the configured native proxy.");
+    }
 
     const scanId = await createScan(
       name,
@@ -113,18 +157,31 @@ export default function SearchScreen() {
       JSON.stringify(nextSettings),
     );
     const collected: CheckResult[] = [];
+    let lastServiceUpdate = 0;
     try {
       const summary = await runScan({
         username: name,
         sites,
         timeoutMs: nextSettings.timeoutMs,
         concurrency: nextSettings.concurrency,
+        fetchFn: nativeFetch ?? undefined,
         signal: controller.signal,
         onResult: (result, progress) => {
           collected.push(result);
           setResults((prev) => [...prev, result]);
           setCompleted(progress.completed);
           setHits(progress.hits);
+          if (
+            serviceActive &&
+            (progress.completed - lastServiceUpdate >= 5 ||
+              progress.completed === progress.total)
+          ) {
+            lastServiceUpdate = progress.completed;
+            void updateScanService(
+              `Scanning ${name}`,
+              `${progress.completed}/${progress.total} sites · ${progress.hits} hits`,
+            );
+          }
         },
       });
       await insertResults(scanId, collected);
@@ -153,6 +210,9 @@ export default function SearchScreen() {
         // Storage failure on top of a scan failure: surface the scan error only.
       }
     } finally {
+      if (serviceActive) {
+        await endScanService();
+      }
       abortRef.current = null;
       setRunning(false);
     }

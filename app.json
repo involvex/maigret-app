@@ -26,6 +26,7 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/withMaigretForeground.js",
       [
         "expo-splash-screen",
         {

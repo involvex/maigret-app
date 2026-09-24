@@ -1,0 +1,21 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'com.maigret.foreground'
+version = '0.1.0'
+
+android {
+  namespace 'com.maigret.foreground'
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+}
+
+dependencies {
+  implementation project(':expo-modules-core')
+  // Pinned to the OkHttp 4.x line React Native ships, so Gradle resolves a
+  // single copy instead of bundling a duplicate.
+  implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}

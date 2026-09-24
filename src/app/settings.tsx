@@ -194,8 +194,9 @@ export default function SettingsScreen() {
             />
             <ThemedText type="small" themeColor="textSecondary">
               For Tor, run Orbot on this device and use {TOR_DEFAULT_PROXY}{" "}
-              (Maigret default). MVP scans use a direct connection until the
-              native proxy layer lands.
+              (Maigret default). The proxy is applied natively (SOCKS5 + auth
+              supported) in dev/production builds; Expo Go scans use a direct
+              connection.
             </ThemedText>
             <Pressable
               onPress={() => setProxy(TOR_DEFAULT_PROXY)}

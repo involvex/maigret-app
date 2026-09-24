@@ -1,0 +1,14 @@
+{
+  "name": "maigret-foreground",
+  "version": "0.1.0",
+  "description": "Foreground service keep-alive and proxied native fetching for Maigret scans (Android)",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {},
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}
