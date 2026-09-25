@@ -27,6 +27,15 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
+      <NativeTabs.Trigger name="watch">
+        <NativeTabs.Trigger.Label>Watch</NativeTabs.Trigger.Label>
+        {/* TODO: add a dedicated watch tab icon asset */}
+        <NativeTabs.Trigger.Icon
+          src={require("@/assets/images/tabIcons/explore.png")}
+          renderingMode="template"
+        />
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="settings">
         <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
         {/* TODO: add a dedicated settings tab icon asset */}
