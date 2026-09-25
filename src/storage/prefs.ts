@@ -11,22 +11,43 @@ const K_MAX_SITES = "maigret.maxSites";
 const K_TAGS = "maigret.tags";
 const K_PROXY = "maigret.proxyUrl";
 const K_RETRY = "maigret.retryRateLimited";
+const K_MAX_RETRIES = "maigret.maxRetries";
 
 function toInt(raw: string | null, fallback: number): number {
   const n = raw == null ? NaN : Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** Like toInt but allows 0 (used for maxRetries). */
+function toClampedInt(
+  raw: string | null,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const n = raw == null ? NaN : Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
 export async function getScanSettings(): Promise<ScanSettings> {
-  const [timeoutMs, concurrency, maxSites, tagsJson, proxyUrl, retryRaw] =
-    await Promise.all([
-      Storage.getItem(K_TIMEOUT),
-      Storage.getItem(K_CONCURRENCY),
-      Storage.getItem(K_MAX_SITES),
-      Storage.getItem(K_TAGS),
-      Storage.getItem(K_PROXY),
-      Storage.getItem(K_RETRY),
-    ]);
+  const [
+    timeoutMs,
+    concurrency,
+    maxSites,
+    tagsJson,
+    proxyUrl,
+    retryRaw,
+    maxRetriesRaw,
+  ] = await Promise.all([
+    Storage.getItem(K_TIMEOUT),
+    Storage.getItem(K_CONCURRENCY),
+    Storage.getItem(K_MAX_SITES),
+    Storage.getItem(K_TAGS),
+    Storage.getItem(K_PROXY),
+    Storage.getItem(K_RETRY),
+    Storage.getItem(K_MAX_RETRIES),
+  ]);
   let tags: string[] = [];
   try {
     const parsed: unknown = tagsJson ? JSON.parse(tagsJson) : [];
@@ -48,6 +69,12 @@ export async function getScanSettings(): Promise<ScanSettings> {
       retryRaw == null
         ? DEFAULT_SCAN_SETTINGS.retryRateLimited
         : retryRaw === "1",
+    maxRetries: toClampedInt(
+      maxRetriesRaw,
+      DEFAULT_SCAN_SETTINGS.maxRetries,
+      0,
+      3,
+    ),
   };
 }
 
@@ -59,5 +86,6 @@ export async function setScanSettings(settings: ScanSettings): Promise<void> {
     Storage.setItem(K_TAGS, JSON.stringify(settings.tags)),
     Storage.setItem(K_PROXY, settings.proxyUrl ?? ""),
     Storage.setItem(K_RETRY, settings.retryRateLimited ? "1" : "0"),
+    Storage.setItem(K_MAX_RETRIES, String(settings.maxRetries)),
   ]);
 }

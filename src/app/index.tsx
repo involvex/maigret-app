@@ -176,6 +176,7 @@ export default function SearchScreen() {
         fetchFn: nativeFetch ?? undefined,
         signal: controller.signal,
         retryRateLimited: nextSettings.retryRateLimited,
+        maxRetries: nextSettings.maxRetries,
         onRetry: ({ count }) => {
           setNotice(
             `Retrying ${count} rate-limited site${count === 1 ? "" : "s"}…`,

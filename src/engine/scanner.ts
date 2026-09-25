@@ -2,12 +2,20 @@
  * Concurrent scan runner with live progress callbacks and cancellation.
  * Results stream in completion order (like Maigret's async output).
  *
- * Rate-limited sites (HTTP 429) are retried before the scan completes:
- * servers often clear short bans within seconds, and a claimed hit hiding
- * behind a 429 must not silently become an "error" in the exported report.
+ * Throttled sites are retried before the scan completes with exponential
+ * backoff: servers often clear short bans within seconds, and a claimed
+ * hit hiding behind a 429/999 must not silently become an "error" in the
+ * exported report. Hard blocks (captcha markers) are never retried.
  */
 import type { CheckResult, FetchLike, MaigretSite } from "./types";
 import { checkSite } from "./checker";
+
+/** Transport-level throttling worth another attempt. */
+export const RETRYABLE_ERRORS: ReadonlySet<string> = new Set([
+  "rate_limited", // HTTP 429 and LinkedIn-style 999
+  "http_503",
+  "http_403", // transient WAF throttles; captcha pages classify as "blocked"
+]);
 
 export interface ScanJob {
   username: string;
@@ -23,11 +31,11 @@ export interface ScanJob {
   ) => void;
   /** Fired before each retry pass over rate-limited sites. */
   onRetry?: (info: { pass: number; count: number }) => void;
-  /** Retry 429s (default true). */
+  /** Retry throttled sites (default true). */
   retryRateLimited?: boolean;
-  /** Extra passes over rate-limited sites (default 1). */
+  /** Extra passes over throttled sites (default 2). */
   maxRetries?: number;
-  /** Wait between passes so short bans can clear (default 3000ms). */
+  /** Base wait between passes, doubled per pass plus jitter (default 3000ms). */
   retryDelayMs?: number;
 }
 
@@ -80,7 +88,7 @@ export async function runScan(job: ScanJob): Promise<ScanSummary> {
     onResult,
     onRetry,
     retryRateLimited = true,
-    maxRetries = 1,
+    maxRetries = 2,
     retryDelayMs = 3000,
   } = job;
   const total = sites.length;
@@ -157,7 +165,8 @@ export async function runScan(job: ScanJob): Promise<ScanSummary> {
 
   await runPool(sites, 0);
 
-  // Retry passes: only rate-limited sites, replaced in place.
+  // Retry passes: only throttled sites, replaced in place, with
+  // exponential backoff (base × 2^(pass-1)) plus bounded jitter.
   if (retryRateLimited && maxRetries > 0) {
     for (let pass = 1; pass <= maxRetries; pass += 1) {
       if (aborted(signal)) {
@@ -166,11 +175,16 @@ export async function runScan(job: ScanJob): Promise<ScanSummary> {
       }
       const limited = sites.filter(([name]) => {
         const current = results.find((r) => r.siteName === name);
-        return current?.status === "error" && current.error === "rate_limited";
+        return (
+          current?.status === "error" &&
+          RETRYABLE_ERRORS.has(current.error ?? "")
+        );
       });
       if (limited.length === 0) break;
       onRetry?.({ pass, count: limited.length });
-      const settled = await delay(retryDelayMs, signal);
+      const base = retryDelayMs * 2 ** (pass - 1);
+      const wait = base + Math.random() * Math.min(1000, base);
+      const settled = await delay(wait, signal);
       if (!settled) {
         cancelled = true;
         break;

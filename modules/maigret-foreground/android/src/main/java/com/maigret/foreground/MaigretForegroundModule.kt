@@ -94,8 +94,13 @@ class MaigretForegroundModule : Module() {
   companion object {
     private val DEFAULT_HEADERS = mapOf(
       "User-Agent" to "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36",
-      "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
       "Accept-Language" to "en-US,en;q=0.9",
+      "Upgrade-Insecure-Requests" to "1",
+      "Sec-Fetch-Site" to "none",
+      "Sec-Fetch-Mode" to "navigate",
+      "Sec-Fetch-User" to "?1",
+      "Sec-Fetch-Dest" to "document",
     )
 
     private fun defaultPort(scheme: String): Int = when (scheme) {

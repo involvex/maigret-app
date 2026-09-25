@@ -155,4 +155,57 @@ describe("rate-limit retries", () => {
     expect(summary.results).toHaveLength(1);
     expect(summary.results[0]?.error).toBe("rate_limited");
   });
+
+  test("transient 403/503s are retried with backoff", async () => {
+    const attempts = new Map<string, number>();
+    const fetch: FetchLike = async (input) => {
+      const url = String(input);
+      const n = (attempts.get(url) ?? 0) + 1;
+      attempts.set(url, n);
+      if (url.includes("s0") && n === 1) {
+        return { status: 403, url, text: async () => "forbidden" };
+      }
+      if (url.includes("s1") && n <= 2) {
+        return { status: 503, url, text: async () => "unavailable" };
+      }
+      return { status: 200, url, text: async () => "hello" };
+    };
+    const summary = await runScan({
+      username: "alice",
+      sites: [
+        ["s0", site(0)],
+        ["s1", site(1)],
+      ],
+      timeoutMs: 5000,
+      concurrency: 2,
+      fetchFn: fetch,
+      retryDelayMs: 1,
+    });
+    expect(summary.retryPasses).toBe(2);
+    expect(summary.hits).toBe(2);
+    expect(summary.results.every((r) => r.status === "claimed")).toBe(true);
+  });
+
+  test("captcha-blocked 403s are not retried", async () => {
+    let calls = 0;
+    const fetch: FetchLike = async (input) => {
+      calls += 1;
+      return {
+        status: 403,
+        url: String(input),
+        text: async () => "solve the CAPTCHA",
+      };
+    };
+    const summary = await runScan({
+      username: "alice",
+      sites: [["s0", site(0)]],
+      timeoutMs: 5000,
+      concurrency: 1,
+      fetchFn: fetch,
+      retryDelayMs: 0,
+    });
+    expect(summary.retryPasses).toBe(0);
+    expect(calls).toBe(1);
+    expect(summary.results[0]?.error).toBe("blocked");
+  });
 });

@@ -64,14 +64,17 @@ export interface ScanSettings {
   proxyUrl?: string;
   /** Re-check HTTP-429 sites once after a cooldown (default true). */
   retryRateLimited: boolean;
+  /** Extra passes over throttled sites, 0-3 (default 2). */
+  maxRetries: number;
 }
 
 export const DEFAULT_SCAN_SETTINGS: ScanSettings = {
   timeoutMs: 15000,
-  concurrency: 20,
+  concurrency: 12,
   maxSites: 80,
   tags: [],
   retryRateLimited: true,
+  maxRetries: 2,
 };
 
 /** Minimal fetch surface the engine needs (keeps checker unit-testable). */

@@ -44,6 +44,18 @@ describe("status_code checks", () => {
     expect(r.error).toBe("rate_limited");
   });
 
+  test("999 (LinkedIn throttle) is a rate-limit error", () => {
+    const r = classifyResponse({
+      status: 999,
+      finalUrl: "",
+      probeUrl: "",
+      body: "",
+      site: { ...base, checkType: "status_code" },
+    });
+    expect(r.status).toBe("error");
+    expect(r.error).toBe("rate_limited");
+  });
+
   test("ignore403 maps 403 to unclaimed", () => {
     expect(
       classifyResponse({

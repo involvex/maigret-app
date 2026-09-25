@@ -57,6 +57,7 @@ export default function SettingsScreen() {
   const [tags, setTags] = useState("");
   const [proxy, setProxy] = useState("");
   const [retryRateLimited, setRetryRateLimited] = useState(true);
+  const [maxRetries, setMaxRetries] = useState("2");
   const [notice, setNotice] = useState<string | null>(null);
   const [dbInfo, setDbInfo] = useState("Loading database info…");
   const [updating, setUpdating] = useState(false);
@@ -73,6 +74,7 @@ export default function SettingsScreen() {
       setTags(settings.tags.join(", "));
       setProxy(settings.proxyUrl ?? "");
       setRetryRateLimited(settings.retryRateLimited);
+      setMaxRetries(String(settings.maxRetries));
       setDbInfo(
         `${active.siteCount} sites (${active.source === "cache" ? "downloaded full DB" : "bundled offline snapshot"})` +
           (active.updatedAt
@@ -106,6 +108,10 @@ export default function SettingsScreen() {
         .filter(Boolean),
       proxyUrl: cleanProxy || undefined,
       retryRateLimited,
+      maxRetries: Math.min(
+        3,
+        Math.max(0, Number.parseInt(maxRetries, 10) || 0),
+      ),
     });
     setNotice("Settings saved.");
   };
@@ -171,11 +177,17 @@ export default function SettingsScreen() {
             >
               <ThemedText type="small">
                 {retryRateLimited
-                  ? "On — re-check HTTP 429 sites once after 3s"
-                  : "Off — keep 429s as errors"}
+                  ? "On — re-check throttled sites with backoff"
+                  : "Off — keep 429/999/503/403s as errors"}
               </ThemedText>
             </Pressable>
           </View>
+
+          <NumberField
+            label="Retry passes for throttled sites (0–3)"
+            value={maxRetries}
+            onChange={setMaxRetries}
+          />
 
           <View style={styles.field}>
             <ThemedText type="smallBold">

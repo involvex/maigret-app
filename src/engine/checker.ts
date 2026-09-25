@@ -11,8 +11,14 @@ import { buildProbeUrl, buildProfileUrl, isUsernameIllegal } from "./sitesDb";
 const DEFAULT_HEADERS: Record<string, string> = {
   "User-Agent":
     "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36",
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.9",
+  "Upgrade-Insecure-Requests": "1",
+  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-User": "?1",
+  "Sec-Fetch-Dest": "document",
 };
 
 /** Generic block-page markers used when a site defines no explicit `errors`. */
@@ -56,7 +62,8 @@ export function classifyResponse(input: ClassifyInput): {
     }
   }
 
-  if (status === 429) return { status: "error", error: "rate_limited" };
+  if (status === 429 || status === 999)
+    return { status: "error", error: "rate_limited" };
   if (status >= 500) return { status: "error", error: `http_${status}` };
   if (status === 403 || status === 401) {
     if (site.ignore403) return { status: "unclaimed" };
